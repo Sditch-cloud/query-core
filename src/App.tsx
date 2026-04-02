@@ -19,17 +19,11 @@ function App() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<RowData[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const headers = useMemo(() => {
-    if (rows.length === 0) {
-      return [];
-    }
-    return Object.keys(rows[0]);
-  }, [rows]);
 
   const totalPages = useMemo(() => {
     if (pageSize === 0) {
@@ -86,6 +80,7 @@ function App() {
         page: 1,
         pageSize,
       });
+      setHeaders(result.headers);
       setRows(result.rows);
       setTotal(data.rows);
       setPage(1);
@@ -113,6 +108,7 @@ function App() {
       if (typeof selected === "string") {
         setFilePath(selected);
         setSummary(null);
+        setHeaders([]);
         setRows([]);
         setTotal(0);
         setPage(1);
@@ -151,6 +147,7 @@ function App() {
     try {
       await invoke("clear_dataset");
       setSummary(null);
+      setHeaders([]);
       setRows([]);
       setKeyword("");
       setColumnsInput("");
@@ -191,6 +188,7 @@ function App() {
           });
 
       setRows(result.rows);
+  setHeaders(result.headers);
       setTotal(result.total);
     } catch (err) {
       setError(String(err));

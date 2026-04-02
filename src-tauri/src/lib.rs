@@ -65,6 +65,7 @@ struct SearchResponse {
     total: usize,
     page: usize,
     page_size: usize,
+    headers: Vec<String>,
     rows: Vec<BTreeMap<String, String>>,
 }
 
@@ -396,6 +397,7 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
         total,
         page: request.page,
         page_size: request.page_size,
+        headers: dataset.headers.clone(),
         rows,
     })
 }
@@ -429,6 +431,7 @@ fn list_rows(page: usize, page_size: usize, state: State<'_, AppState>) -> Resul
         total,
         page,
         page_size,
+        headers: dataset.headers.clone(),
         rows,
     })
 }
