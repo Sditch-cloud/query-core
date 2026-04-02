@@ -1,0 +1,166 @@
+:root {
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: #1f2937;
+  background:
+    radial-gradient(circle at top right, rgba(255, 184, 0, 0.22), transparent 35%),
+    radial-gradient(circle at top left, rgba(6, 182, 212, 0.18), transparent 40%),
+    #f3f4f6;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.subtitle {
+  margin-top: 4px;
+  color: #4b5563;
+}
+
+.panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.panel h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 1.1rem;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+input,
+select,
+button {
+  border-radius: 8px;
+  border: 1px solid #9ca3af;
+  padding: 0.55em 0.9em;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: #1f2937;
+  background-color: #ffffff;
+}
+
+button {
+  cursor: pointer;
+  border-color: #0f766e;
+  background-color: #14b8a6;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+button:hover {
+  background-color: #0f766e;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+input {
+  min-width: 250px;
+  flex: 1;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.checkbox-row input {
+  min-width: auto;
+  flex: none;
+}
+
+.meta {
+  margin-top: 10px;
+  color: #0f766e;
+}
+
+.pagination {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.error {
+  color: #b91c1c;
+  font-weight: 600;
+  margin-top: 12px;
+}
+
+.table-wrap {
+  margin-top: 8px;
+  overflow-x: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+}
+
+th,
+td {
+  padding: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: #e6fffb;
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 768px) {
+  .app {
+    padding: 14px;
+  }
+
+  input {
+    min-width: 100%;
+  }
+
+  .controls {
+    flex-direction: column;
+  }
+}
