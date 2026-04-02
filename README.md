@@ -42,3 +42,25 @@ npx tauri build
 ## 权限与 capability
 项目使用 Tauri 的 capability（能力）系统控制前端对核心 API 与插件的访问，配置文件在 [src-tauri/gen/schemas/capabilities.json](src-tauri/gen/schemas/capabilities.json)。若需修改窗口权限，优先通过能力文件/`tauri.conf.json` 调整，不要随意直接修改生成的 schema 文件。
 
+## GitHub Actions 自动打包发布
+已添加工作流文件：`.github/workflows/release.yml`。
+
+### 触发方式
+- 推送语义化版本 Tag（如 `v0.1.0`）时自动触发。
+- 也支持在 GitHub Actions 页面手动触发（`workflow_dispatch`）。
+
+### 发布步骤
+1. 更新版本号（建议保持 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 一致）。
+2. 提交代码并打 Tag：
+```bash
+git add .
+git commit -m "release: v0.1.0"
+git tag v0.1.0
+git push origin main --tags
+```
+3. 等待 Actions 完成后，在 GitHub Releases 页面可看到自动创建的 Release 和安装包附件。
+
+### 注意事项
+- 当前工作流默认在 `windows-latest` 打包，适合你当前的 Windows 发布需求。
+- 使用的是仓库内置 `GITHUB_TOKEN` 自动创建 Release，无需额外配置私有 Token。
+
