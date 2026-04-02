@@ -12,6 +12,8 @@ import "./App.css";
 function App() {
   const [filePath, setFilePath] = useState("");
   const [hasHeader, setHasHeader] = useState(true);
+  const [sheetNames, setSheetNames] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState("");
   const [keyword, setKeyword] = useState("");
   const [columnsInput, setColumnsInput] = useState("");
   const [page, setPage] = useState(1);
@@ -45,6 +47,8 @@ function App() {
     return segments[segments.length - 1] || filePath;
   }, [filePath]);
 
+  const isXlsx = useMemo(() => filePath.toLowerCase().endsWith(".xlsx"), [filePath]);
+
   function formatFileSize(bytes: number) {
     if (bytes < 1024) {
       return `${bytes} B`;
@@ -55,6 +59,43 @@ function App() {
     }
 
     return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  async function importFile(targetFilePath: string, targetSheet?: string) {
+    if (!targetFilePath.trim()) {
+      setError("请先选择文件");
+      return;
+    }
+    if (targetFilePath.toLowerCase().endsWith(".xlsx") && !targetSheet) {
+      setError("请选择需要导入的 sheet");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const data = await invoke<ImportSummary>("import_file", {
+        request: {
+          filePath: targetFilePath,
+          hasHeader,
+          sheetName: targetFilePath.toLowerCase().endsWith(".xlsx") ? targetSheet : undefined,
+        },
+      });
+      setSummary(data);
+      const result = await invoke<SearchResponse>("list_rows", {
+        page: 1,
+        pageSize,
+      });
+      setRows(result.rows);
+      setTotal(data.rows);
+      setPage(1);
+      setKeyword("");
+      setColumnsInput("");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function pickFile() {
@@ -71,39 +112,36 @@ function App() {
 
       if (typeof selected === "string") {
         setFilePath(selected);
+        setSummary(null);
+        setRows([]);
+        setTotal(0);
+        setPage(1);
+
+        if (selected.toLowerCase().endsWith(".xlsx")) {
+          const sheets = await invoke<string[]>("list_sheets", {
+            request: { filePath: selected },
+          });
+          setSheetNames(sheets);
+          const defaultSheet = sheets[0] ?? "";
+          setSelectedSheet(defaultSheet);
+          if (defaultSheet) {
+            await importFile(selected, defaultSheet);
+          }
+        } else {
+          setSheetNames([]);
+          setSelectedSheet("");
+          await importFile(selected);
+        }
       }
     } catch (err) {
       setError(`文件选择失败: ${String(err)}`);
     }
   }
 
-  async function importFile() {
-    if (!filePath.trim()) {
-      setError("请先选择文件");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    try {
-      const data = await invoke<ImportSummary>("import_file", {
-        request: {
-          filePath,
-          hasHeader,
-        },
-      });
-      setSummary(data);
-      setPage(1);
-      const result = await invoke<SearchResponse>("list_rows", {
-        page: 1,
-        pageSize,
-      });
-      setRows(result.rows);
-      setTotal(data.rows);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
+  async function handleSheetChange(nextSheet: string) {
+    setSelectedSheet(nextSheet);
+    if (filePath && nextSheet) {
+      await importFile(filePath, nextSheet);
     }
   }
 
@@ -217,6 +255,27 @@ function App() {
           <p className="file-selection-name">{selectedFileName}</p>
           <p className="file-selection-path">{filePath || "点击上方按钮后，将弹出 Windows 原生文件选择窗口。"}</p>
         </div>
+        {isXlsx ? (
+          <div className="controls">
+            <label>
+              Sheet
+              <select
+                value={selectedSheet}
+                onChange={(e) => {
+                  void handleSheetChange(e.currentTarget.value);
+                }}
+                disabled={loading || sheetNames.length === 0}
+              >
+                {sheetNames.length === 0 ? <option value="">无可用 sheet</option> : null}
+                {sheetNames.map((sheet) => (
+                  <option key={sheet} value={sheet}>
+                    {sheet}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
         <label className="checkbox-row">
           <input
             type="checkbox"
@@ -226,9 +285,6 @@ function App() {
           文件包含表头（无表头请取消勾选）
         </label>
         <div className="controls">
-          <button type="button" onClick={importFile} disabled={loading}>
-            {loading ? "处理中..." : "导入"}
-          </button>
           <button type="button" onClick={clearAll} disabled={loading}>
             清空数据
           </button>
@@ -236,7 +292,9 @@ function App() {
         {summary ? (
           <p className="meta">
             已导入：{summary.fileName} | 行数：{summary.rows} | 列数：
-            {summary.columns} | 大小：{formatFileSize(summary.fileSize)}
+            {summary.columns}
+            {summary.sheetName ? ` | Sheet：${summary.sheetName}` : ""} | 大小：
+            {formatFileSize(summary.fileSize)}
           </p>
         ) : null}
       </section>

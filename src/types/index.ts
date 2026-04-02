@@ -4,6 +4,7 @@ export type ImportSummary = {
   rows: number;
   columns: number;
   hasHeader: boolean;
+  sheetName?: string | null;
 };
 
 export type SearchRequest = {

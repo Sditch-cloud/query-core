@@ -22,6 +22,7 @@ struct DataSet {
     file_name: String,
     file_size: u64,
     has_header: bool,
+    sheet_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +30,13 @@ struct DataSet {
 struct ImportRequest {
     file_path: String,
     has_header: bool,
+    sheet_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListSheetsRequest {
+    file_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -39,6 +47,7 @@ struct ImportSummary {
     rows: usize,
     columns: usize,
     has_header: bool,
+    sheet_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,11 +153,28 @@ fn parse_csv(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec<
     Ok((headers, normalized_rows))
 }
 
-fn parse_xlsx(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+fn parse_xlsx(
+    file_path: &str,
+    has_header: bool,
+    selected_sheet: Option<&str>,
+) -> Result<(String, Vec<String>, Vec<Vec<String>>), String> {
     let mut workbook = open_workbook_auto(file_path).map_err(|err| format!("Excel 打开失败: {}", err))?;
+    let sheet_names = workbook.sheet_names().to_vec();
+    if sheet_names.is_empty() {
+        return Err("Excel 没有工作表".to_string());
+    }
+
+    let target_sheet = if let Some(sheet_name) = selected_sheet {
+        if !sheet_names.iter().any(|name| name == sheet_name) {
+            return Err(format!("未找到指定的 sheet: {}", sheet_name));
+        }
+        sheet_name.to_string()
+    } else {
+        sheet_names[0].clone()
+    };
+
     let range = workbook
-        .worksheet_range_at(0)
-        .ok_or_else(|| "Excel 没有工作表".to_string())?
+        .worksheet_range(&target_sheet)
         .map_err(|err| format!("Excel 读取失败: {}", err))?;
 
     let all_rows: Vec<Vec<String>> = range
@@ -193,7 +219,7 @@ fn parse_xlsx(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec
         .map(|row| normalize_row(row, headers.len()))
         .collect();
 
-    Ok((headers, normalized_rows))
+    Ok((target_sheet, headers, normalized_rows))
 }
 
 fn row_to_map(headers: &[String], row: &[String]) -> BTreeMap<String, String> {
@@ -225,9 +251,16 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
         .map(|s| s.to_ascii_lowercase())
         .ok_or_else(|| "无法识别文件扩展名".to_string())?;
 
-    let (headers, rows) = match extension.as_str() {
-        "csv" => parse_csv(&request.file_path, request.has_header)?,
-        "xlsx" => parse_xlsx(&request.file_path, request.has_header)?,
+    let (sheet_name, headers, rows) = match extension.as_str() {
+        "csv" => {
+            let (headers, rows) = parse_csv(&request.file_path, request.has_header)?;
+            (None, headers, rows)
+        }
+        "xlsx" => {
+            let (target_sheet, headers, rows) =
+                parse_xlsx(&request.file_path, request.has_header, request.sheet_name.as_deref())?;
+            (Some(target_sheet), headers, rows)
+        }
         _ => return Err("仅支持 CSV 或 XLSX 文件".to_string()),
     };
 
@@ -243,6 +276,7 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
         rows: rows.len(),
         columns: headers.len(),
         has_header: request.has_header,
+        sheet_name: sheet_name.clone(),
     };
 
     let dataset = DataSet {
@@ -251,6 +285,7 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
         file_name,
         file_size: metadata.len(),
         has_header: request.has_header,
+        sheet_name,
     };
 
     let mut data_guard = state
@@ -260,6 +295,27 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
     *data_guard = Some(dataset);
 
     Ok(summary)
+}
+
+#[tauri::command]
+fn list_sheets(request: ListSheetsRequest) -> Result<Vec<String>, String> {
+    let path = Path::new(&request.file_path);
+    if !path.exists() {
+        return Err("文件不存在".to_string());
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .ok_or_else(|| "无法识别文件扩展名".to_string())?;
+
+    if extension != "xlsx" {
+        return Ok(Vec::new());
+    }
+
+    let workbook = open_workbook_auto(&request.file_path).map_err(|err| format!("Excel 打开失败: {}", err))?;
+    Ok(workbook.sheet_names().to_vec())
 }
 
 #[tauri::command]
@@ -400,6 +456,7 @@ fn get_dataset_info(state: State<'_, AppState>) -> Result<Option<ImportSummary>,
         rows: dataset.rows.len(),
         columns: dataset.headers.len(),
         has_header: dataset.has_header,
+        sheet_name: dataset.sheet_name.clone(),
     }))
 }
 
@@ -410,6 +467,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            list_sheets,
             import_file,
             preview_rows,
             search_rows,
