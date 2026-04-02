@@ -59,6 +59,17 @@ struct SearchResponse {
     rows: Vec<BTreeMap<String, String>>,
 }
 
+fn validate_pagination(page: usize, page_size: usize) -> Result<(), String> {
+    if page == 0 {
+        return Err("page 必须大于 0".to_string());
+    }
+    if page_size == 0 || page_size > MAX_PAGE_SIZE {
+        return Err(format!("pageSize 必须在 1 到 {} 之间", MAX_PAGE_SIZE));
+    }
+
+    Ok(())
+}
+
 fn normalize_row(mut row: Vec<String>, target_len: usize) -> Vec<String> {
     if row.len() < target_len {
         row.resize(target_len, String::new());
@@ -277,12 +288,7 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
     if request.keyword.trim().is_empty() {
         return Err("关键字不能为空".to_string());
     }
-    if request.page == 0 {
-        return Err("page 必须大于 0".to_string());
-    }
-    if request.page_size == 0 || request.page_size > MAX_PAGE_SIZE {
-        return Err(format!("pageSize 必须在 1 到 {} 之间", MAX_PAGE_SIZE));
-    }
+    validate_pagination(request.page, request.page_size)?;
 
     let data_guard = state
         .dataset
@@ -339,6 +345,39 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
 }
 
 #[tauri::command]
+fn list_rows(page: usize, page_size: usize, state: State<'_, AppState>) -> Result<SearchResponse, String> {
+    validate_pagination(page, page_size)?;
+
+    let data_guard = state
+        .dataset
+        .read()
+        .map_err(|_| "状态读取失败".to_string())?;
+    let dataset = data_guard
+        .as_ref()
+        .ok_or_else(|| "请先导入文件".to_string())?;
+
+    let total = dataset.rows.len();
+    let start = (page - 1) * page_size;
+    let end = start.saturating_add(page_size).min(total);
+
+    let rows = if start >= total {
+        Vec::new()
+    } else {
+        dataset.rows[start..end]
+            .iter()
+            .map(|row| row_to_map(&dataset.headers, row))
+            .collect()
+    };
+
+    Ok(SearchResponse {
+        total,
+        page,
+        page_size,
+        rows,
+    })
+}
+
+#[tauri::command]
 fn clear_dataset(state: State<'_, AppState>) -> Result<(), String> {
     let mut data_guard = state
         .dataset
@@ -374,6 +413,7 @@ pub fn run() {
             import_file,
             preview_rows,
             search_rows,
+            list_rows,
             clear_dataset,
             get_dataset_info
         ])

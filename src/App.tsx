@@ -36,19 +36,44 @@ function App() {
     return Math.max(1, Math.ceil(total / pageSize));
   }, [total, pageSize]);
 
+  const selectedFileName = useMemo(() => {
+    if (!filePath) {
+      return "未选择文件";
+    }
+
+    const segments = filePath.split(/[/\\]/);
+    return segments[segments.length - 1] || filePath;
+  }, [filePath]);
+
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024) {
+      return `${bytes} B`;
+    }
+
+    if (bytes < 1024 * 1024) {
+      return `${(bytes / 1024).toFixed(2)} KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
   async function pickFile() {
     setError("");
-    const selected = await open({
-      multiple: false,
-      filters: [
-        { name: "Data Files", extensions: ["csv", "xlsx"] },
-        { name: "CSV", extensions: ["csv"] },
-        { name: "Excel", extensions: ["xlsx"] },
-      ],
-    });
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          { name: "Data Files", extensions: ["csv", "xlsx"] },
+          { name: "CSV", extensions: ["csv"] },
+          { name: "Excel", extensions: ["xlsx"] },
+        ],
+      });
 
-    if (typeof selected === "string") {
-      setFilePath(selected);
+      if (typeof selected === "string") {
+        setFilePath(selected);
+      }
+    } catch (err) {
+      setError(`文件选择失败: ${String(err)}`);
     }
   }
 
@@ -68,10 +93,13 @@ function App() {
         },
       });
       setSummary(data);
-      const preview = await invoke<RowData[]>("preview_rows", { limit: 50 });
-      setRows(preview);
-      setTotal(preview.length);
       setPage(1);
+      const result = await invoke<SearchResponse>("list_rows", {
+        page: 1,
+        pageSize,
+      });
+      setRows(result.rows);
+      setTotal(data.rows);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -98,27 +126,32 @@ function App() {
     }
   }
 
-  async function refreshByPage(nextPageValue: number, nextPageSize: number) {
-    if (!keyword.trim()) {
-      return;
-    }
-
-    const columns = columnsInput
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    const request: SearchRequest = {
-      keyword,
-      page: nextPageValue,
-      pageSize: nextPageSize,
-      columns: columns.length ? columns : undefined,
-    };
-
+  async function refreshByPage(
+    nextPageValue: number,
+    nextPageSize: number,
+    keywordOverride?: string,
+  ) {
     setLoading(true);
     setError("");
     try {
-      const result = await invoke<SearchResponse>("search_rows", { request });
+      const trimmedKeyword = (keywordOverride ?? keyword).trim();
+      const result = trimmedKeyword
+        ? await invoke<SearchResponse>("search_rows", {
+            request: {
+              keyword: trimmedKeyword,
+              page: nextPageValue,
+              pageSize: nextPageSize,
+              columns: columnsInput
+                .split(",")
+                .map((item) => item.trim())
+                .filter(Boolean),
+            } satisfies SearchRequest,
+          })
+        : await invoke<SearchResponse>("list_rows", {
+            page: nextPageValue,
+            pageSize: nextPageSize,
+          });
+
       setRows(result.rows);
       setTotal(result.total);
     } catch (err) {
@@ -138,6 +171,15 @@ function App() {
     e.preventDefault();
     setPage(1);
     await refreshByPage(1, pageSize);
+  }
+
+  async function handleKeywordChange(nextKeyword: string) {
+    setKeyword(nextKeyword);
+
+    if (!nextKeyword.trim() && summary) {
+      setPage(1);
+      await refreshByPage(1, pageSize, "");
+    }
   }
 
   async function handlePrevPage() {
@@ -167,13 +209,13 @@ function App() {
         <h2>1. 导入文件</h2>
         <div className="controls">
           <button type="button" onClick={pickFile} disabled={loading}>
-            选择文件
+            从系统文件管理器选择
           </button>
-          <input
-            value={filePath}
-            onChange={(e) => setFilePath(e.currentTarget.value)}
-            placeholder="文件路径"
-          />
+        </div>
+        <div className="file-selection-card">
+          <p className="file-selection-label">当前选择</p>
+          <p className="file-selection-name">{selectedFileName}</p>
+          <p className="file-selection-path">{filePath || "点击上方按钮后，将弹出 Windows 原生文件选择窗口。"}</p>
         </div>
         <label className="checkbox-row">
           <input
@@ -194,7 +236,7 @@ function App() {
         {summary ? (
           <p className="meta">
             已导入：{summary.fileName} | 行数：{summary.rows} | 列数：
-            {summary.columns} | 大小：{(summary.fileSize / 1024 / 1024).toFixed(2)} MB
+            {summary.columns} | 大小：{formatFileSize(summary.fileSize)}
           </p>
         ) : null}
       </section>
@@ -205,7 +247,9 @@ function App() {
           <div className="controls">
             <input
               value={keyword}
-              onChange={(e) => setKeyword(e.currentTarget.value)}
+              onChange={(e) => {
+                void handleKeywordChange(e.currentTarget.value);
+              }}
               placeholder="输入关键字（包含匹配，大小写不敏感）"
             />
             <input

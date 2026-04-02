@@ -105,6 +105,35 @@ input {
   flex: none;
 }
 
+.file-selection-card {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(135deg, rgba(240, 253, 250, 0.95), rgba(255, 251, 235, 0.95));
+}
+
+.file-selection-label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.file-selection-name {
+  margin: 6px 0 2px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.file-selection-path {
+  margin: 0;
+  color: #475569;
+  word-break: break-all;
+}
+
 .meta {
   margin-top: 10px;
   color: #0f766e;
