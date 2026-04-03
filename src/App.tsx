@@ -20,6 +20,7 @@ function App() {
   const [pageSize, setPageSize] = useState(50);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
+  const [headerKeys, setHeaderKeys] = useState<string[]>([]);
   const [rows, setRows] = useState<RowData[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -81,6 +82,7 @@ function App() {
         pageSize,
       });
       setHeaders(result.headers);
+      setHeaderKeys(result.headerKeys);
       setRows(result.rows);
       setTotal(data.rows);
       setPage(1);
@@ -109,6 +111,7 @@ function App() {
         setFilePath(selected);
         setSummary(null);
         setHeaders([]);
+        setHeaderKeys([]);
         setRows([]);
         setTotal(0);
         setPage(1);
@@ -148,6 +151,7 @@ function App() {
       await invoke("clear_dataset");
       setSummary(null);
       setHeaders([]);
+      setHeaderKeys([]);
       setRows([]);
       setKeyword("");
       setColumnsInput("");
@@ -188,7 +192,8 @@ function App() {
           });
 
       setRows(result.rows);
-  setHeaders(result.headers);
+        setHeaders(result.headers);
+        setHeaderKeys(result.headerKeys);
       setTotal(result.total);
     } catch (err) {
       setError(String(err));
@@ -360,16 +365,16 @@ function App() {
           <table>
             <thead>
               <tr>
-                {headers.map((header) => (
-                  <th key={header}>{header}</th>
+                {headers.map((header, idx) => (
+                  <th key={`${header}-${idx}`}>{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map((row, idx) => (
                 <tr key={idx}>
-                  {headers.map((header) => (
-                    <td key={`${idx}-${header}`}>{row[header]}</td>
+                  {headerKeys.map((headerKey, colIdx) => (
+                    <td key={`${idx}-${headerKey}`}>{row[headerKey] ?? ""}</td>
                   ))}
                 </tr>
               ))}

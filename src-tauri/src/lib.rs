@@ -1,7 +1,7 @@
 use calamine::{open_workbook_auto, Data, Dimensions, Reader, Sheets};
 use csv::ReaderBuilder;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::RwLock;
@@ -17,7 +17,8 @@ struct AppState {
 
 #[derive(Clone, Debug)]
 struct DataSet {
-    headers: Vec<String>,
+    display_headers: Vec<String>,
+    unique_headers: Vec<String>,
     rows: Vec<Vec<String>>,
     file_name: String,
     file_size: u64,
@@ -66,6 +67,7 @@ struct SearchResponse {
     page: usize,
     page_size: usize,
     headers: Vec<String>,
+    header_keys: Vec<String>,
     rows: Vec<BTreeMap<String, String>>,
 }
 
@@ -89,6 +91,73 @@ fn normalize_row(mut row: Vec<String>, target_len: usize) -> Vec<String> {
 
 fn generate_headers(count: usize) -> Vec<String> {
     (1..=count).map(|idx| format!("column_{}", idx)).collect()
+}
+
+fn ensure_unique_headers(headers: Vec<String>) -> Vec<String> {
+    let mut used = HashSet::new();
+    let mut unique = Vec::with_capacity(headers.len());
+
+    for (idx, header) in headers.into_iter().enumerate() {
+        let base = if header.trim().is_empty() {
+            format!("column_{}", idx + 1)
+        } else {
+            header
+        };
+
+        if !used.contains(&base) {
+            used.insert(base.clone());
+            unique.push(base);
+            continue;
+        }
+
+        let mut suffix = 2;
+        loop {
+            let candidate = format!("{}_{}", base, suffix);
+            if !used.contains(&candidate) {
+                used.insert(candidate.clone());
+                unique.push(candidate);
+                break;
+            }
+            suffix += 1;
+        }
+    }
+
+    unique
+}
+
+fn normalize_headers(headers: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let display_headers: Vec<String> = headers
+        .into_iter()
+        .enumerate()
+        .map(|(idx, header)| {
+            if header.trim().is_empty() {
+                format!("column_{}", idx + 1)
+            } else {
+                header
+            }
+        })
+        .collect();
+
+    let unique_headers = ensure_unique_headers(display_headers.clone());
+    (display_headers, unique_headers)
+}
+
+fn resolve_selected_indices(
+    columns: &[String],
+    display_headers: &[String],
+    unique_headers: &[String],
+) -> Vec<usize> {
+    let mut indices = Vec::new();
+
+    for name in columns {
+        for (idx, (display, unique)) in display_headers.iter().zip(unique_headers.iter()).enumerate() {
+            if (display == name || unique == name) && !indices.contains(&idx) {
+                indices.push(idx);
+            }
+        }
+    }
+
+    indices
 }
 
 fn cell_to_string(cell: &Data) -> String {
@@ -130,7 +199,10 @@ fn fill_merged_cells(rows: &mut Vec<Vec<String>>, range_start: (u32, u32), merge
     }
 }
 
-fn parse_csv(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+fn parse_csv(
+    file_path: &str,
+    has_header: bool,
+) -> Result<(Vec<String>, Vec<String>, Vec<Vec<String>>), String> {
     let mut reader = ReaderBuilder::new()
         .has_headers(has_header)
         .from_path(file_path)
@@ -171,19 +243,21 @@ fn parse_csv(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec<
         headers.extend(extra_headers);
     }
 
+    let (display_headers, unique_headers) = normalize_headers(headers);
+
     let normalized_rows = rows
         .into_iter()
-        .map(|row| normalize_row(row, headers.len()))
+        .map(|row| normalize_row(row, unique_headers.len()))
         .collect();
 
-    Ok((headers, normalized_rows))
+    Ok((display_headers, unique_headers, normalized_rows))
 }
 
 fn parse_xlsx(
     file_path: &str,
     has_header: bool,
     selected_sheet: Option<&str>,
-) -> Result<(String, Vec<String>, Vec<Vec<String>>), String> {
+) -> Result<(String, Vec<String>, Vec<String>, Vec<Vec<String>>), String> {
     let mut workbook = open_workbook_auto(file_path).map_err(|err| format!("Excel 打开失败: {}", err))?;
     let sheet_names = workbook.sheet_names().to_vec();
     if sheet_names.is_empty() {
@@ -252,12 +326,14 @@ fn parse_xlsx(
         headers.extend(extra_headers);
     }
 
+    let (display_headers, unique_headers) = normalize_headers(headers);
+
     let normalized_rows = data_rows
         .into_iter()
-        .map(|row| normalize_row(row, headers.len()))
+        .map(|row| normalize_row(row, unique_headers.len()))
         .collect();
 
-    Ok((target_sheet, headers, normalized_rows))
+    Ok((target_sheet, display_headers, unique_headers, normalized_rows))
 }
 
 fn row_to_map(headers: &[String], row: &[String]) -> BTreeMap<String, String> {
@@ -289,15 +365,16 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
         .map(|s| s.to_ascii_lowercase())
         .ok_or_else(|| "无法识别文件扩展名".to_string())?;
 
-    let (sheet_name, headers, rows) = match extension.as_str() {
+    let (sheet_name, display_headers, unique_headers, rows) = match extension.as_str() {
         "csv" => {
-            let (headers, rows) = parse_csv(&request.file_path, request.has_header)?;
-            (None, headers, rows)
+            let (display_headers, unique_headers, rows) =
+                parse_csv(&request.file_path, request.has_header)?;
+            (None, display_headers, unique_headers, rows)
         }
         "xlsx" => {
-            let (target_sheet, headers, rows) =
+            let (target_sheet, display_headers, unique_headers, rows) =
                 parse_xlsx(&request.file_path, request.has_header, request.sheet_name.as_deref())?;
-            (Some(target_sheet), headers, rows)
+            (Some(target_sheet), display_headers, unique_headers, rows)
         }
         _ => return Err("仅支持 CSV 或 XLSX 文件".to_string()),
     };
@@ -312,13 +389,14 @@ fn import_file(request: ImportRequest, state: State<'_, AppState>) -> Result<Imp
         file_name: file_name.clone(),
         file_size: metadata.len(),
         rows: rows.len(),
-        columns: headers.len(),
+        columns: unique_headers.len(),
         has_header: request.has_header,
         sheet_name: sheet_name.clone(),
     };
 
     let dataset = DataSet {
-        headers,
+        display_headers,
+        unique_headers,
         rows,
         file_name,
         file_size: metadata.len(),
@@ -371,7 +449,7 @@ fn preview_rows(limit: usize, state: State<'_, AppState>) -> Result<Vec<BTreeMap
         .rows
         .iter()
         .take(actual_limit)
-        .map(|row| row_to_map(&dataset.headers, row))
+        .map(|row| row_to_map(&dataset.unique_headers, row))
         .collect();
 
     Ok(rows)
@@ -394,11 +472,10 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
 
     let keyword = request.keyword.to_lowercase();
     let selected_indices: Vec<usize> = match request.columns {
-        Some(columns) if !columns.is_empty() => columns
-            .iter()
-            .filter_map(|name| dataset.headers.iter().position(|header| header == name))
-            .collect(),
-        _ => (0..dataset.headers.len()).collect(),
+        Some(columns) if !columns.is_empty() => {
+            resolve_selected_indices(&columns, &dataset.display_headers, &dataset.unique_headers)
+        }
+        _ => (0..dataset.unique_headers.len()).collect(),
     };
 
     if selected_indices.is_empty() {
@@ -426,7 +503,7 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
     } else {
         matched_rows[start..end]
             .iter()
-            .map(|row| row_to_map(&dataset.headers, row))
+            .map(|row| row_to_map(&dataset.unique_headers, row))
             .collect()
     };
 
@@ -434,7 +511,8 @@ fn search_rows(request: SearchRequest, state: State<'_, AppState>) -> Result<Sea
         total,
         page: request.page,
         page_size: request.page_size,
-        headers: dataset.headers.clone(),
+        headers: dataset.display_headers.clone(),
+        header_keys: dataset.unique_headers.clone(),
         rows,
     })
 }
@@ -460,7 +538,7 @@ fn list_rows(page: usize, page_size: usize, state: State<'_, AppState>) -> Resul
     } else {
         dataset.rows[start..end]
             .iter()
-            .map(|row| row_to_map(&dataset.headers, row))
+            .map(|row| row_to_map(&dataset.unique_headers, row))
             .collect()
     };
 
@@ -468,7 +546,8 @@ fn list_rows(page: usize, page_size: usize, state: State<'_, AppState>) -> Resul
         total,
         page,
         page_size,
-        headers: dataset.headers.clone(),
+        headers: dataset.display_headers.clone(),
+        header_keys: dataset.unique_headers.clone(),
         rows,
     })
 }
@@ -494,7 +573,7 @@ fn get_dataset_info(state: State<'_, AppState>) -> Result<Option<ImportSummary>,
         file_name: dataset.file_name.clone(),
         file_size: dataset.file_size,
         rows: dataset.rows.len(),
-        columns: dataset.headers.len(),
+        columns: dataset.unique_headers.len(),
         has_header: dataset.has_header,
         sheet_name: dataset.sheet_name.clone(),
     }))

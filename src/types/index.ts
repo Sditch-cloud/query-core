@@ -19,6 +19,7 @@ export type SearchResponse = {
   page: number;
   pageSize: number;
   headers: string[];
+  headerKeys: string[];
   rows: RowData[];
 };
 
