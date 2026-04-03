@@ -1,4 +1,4 @@
-use calamine::{open_workbook_auto, Data, Reader};
+use calamine::{open_workbook_auto, Data, Dimensions, Reader, Sheets};
 use csv::ReaderBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -105,6 +105,31 @@ fn cell_to_string(cell: &Data) -> String {
     }
 }
 
+fn fill_merged_cells(rows: &mut Vec<Vec<String>>, range_start: (u32, u32), merges: &[Dimensions]) {
+    for dim in merges {
+        let start_row = (dim.start.0 as usize).saturating_sub(range_start.0 as usize);
+        let start_col = (dim.start.1 as usize).saturating_sub(range_start.1 as usize);
+        let end_row = (dim.end.0 as usize).saturating_sub(range_start.0 as usize);
+        let end_col = (dim.end.1 as usize).saturating_sub(range_start.1 as usize);
+
+        let value = rows
+            .get(start_row)
+            .and_then(|row| row.get(start_col))
+            .cloned()
+            .unwrap_or_default();
+
+        for r in start_row..=end_row {
+            if let Some(row) = rows.get_mut(r) {
+                for c in start_col..=end_col {
+                    if let Some(cell) = row.get_mut(c) {
+                        *cell = value.clone();
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn parse_csv(file_path: &str, has_header: bool) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
     let mut reader = ReaderBuilder::new()
         .has_headers(has_header)
@@ -178,10 +203,22 @@ fn parse_xlsx(
         .worksheet_range(&target_sheet)
         .map_err(|err| format!("Excel 读取失败: {}", err))?;
 
-    let all_rows: Vec<Vec<String>> = range
+    let merges: Vec<Dimensions> = if let Sheets::Xlsx(ref mut xlsx) = workbook {
+        xlsx.worksheet_merge_cells(&target_sheet)
+            .and_then(|r| r.ok())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    let range_start = range.start().unwrap_or((0, 0));
+
+    let mut all_rows: Vec<Vec<String>> = range
         .rows()
         .map(|row| row.iter().map(cell_to_string).collect::<Vec<String>>())
         .collect();
+
+    fill_merged_cells(&mut all_rows, range_start, &merges);
 
     if all_rows.is_empty() {
         return Err("Excel 文件为空".to_string());
